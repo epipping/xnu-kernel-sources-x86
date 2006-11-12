@@ -1,23 +1,31 @@
 /*
  * Copyright (c) 2000-2004 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_HEADER_START@
+ * @APPLE_LICENSE_OSREFERENCE_HEADER_START@
  * 
- * The contents of this file constitute Original Code as defined in and
- * are subject to the Apple Public Source License Version 1.1 (the
- * "License").  You may not use this file except in compliance with the
- * License.  Please obtain a copy of the License at
- * http://www.apple.com/publicsource and read it before using this file.
- * 
- * This Original Code and all software distributed under the License are
- * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
- * License for the specific language governing rights and limitations
- * under the License.
- * 
- * @APPLE_LICENSE_HEADER_END@
+ * This file contains Original Code and/or Modifications of Original Code 
+ * as defined in and that are subject to the Apple Public Source License 
+ * Version 2.0 (the 'License'). You may not use this file except in 
+ * compliance with the License.  The rights granted to you under the 
+ * License may not be used to create, or enable the creation or 
+ * redistribution of, unlawful or unlicensed copies of an Apple operating 
+ * system, or to circumvent, violate, or enable the circumvention or 
+ * violation of, any terms of an Apple operating system software license 
+ * agreement.
+ *
+ * Please obtain a copy of the License at 
+ * http://www.opensource.apple.com/apsl/ and read it before using this 
+ * file.
+ *
+ * The Original Code and all software distributed under the License are 
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER 
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES, 
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY, 
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT. 
+ * Please see the License for the specific language governing rights and 
+ * limitations under the License.
+ *
+ * @APPLE_LICENSE_OSREFERENCE_HEADER_END@
  */
 /*
  * @OSF_COPYRIGHT@
@@ -85,6 +93,7 @@ vm_size_t kalloc_kernmap_size;	/* size of kallocs that can come from kernel map 
 unsigned int kalloc_large_inuse;
 vm_size_t    kalloc_large_total;
 vm_size_t    kalloc_large_max;
+vm_size_t    kalloc_largest_allocated = 0;
 
 /*
  *	All allocations of size less than kalloc_max are rounded to the
@@ -236,9 +245,12 @@ kalloc_canblock(
 		  return(0);
 		}
 
-		if (size >=  kalloc_kernmap_size) 
+		if (size >=  kalloc_kernmap_size) {
 			alloc_map = kernel_map;
-		else
+
+			if (size > kalloc_largest_allocated)
+			        kalloc_largest_allocated = size;
+		} else
 			alloc_map = kalloc_map;
 
 		if (kmem_alloc(alloc_map, (vm_offset_t *)&addr, size) != KERN_SUCCESS) 
@@ -446,9 +458,31 @@ kfree(
 	/* if size was too large for a zone, then use kmem_free */
 
 	if (size >= kalloc_max_prerounded) {
-		if (size >=  kalloc_kernmap_size) 
+	        if (size >=  kalloc_kernmap_size) {
 			alloc_map = kernel_map;
-		else
+
+			if (size > kalloc_largest_allocated)
+			        /*
+				 * work around double FREEs of small MALLOCs
+				 * this used to end up being a nop
+				 * since the pointer being freed from an
+				 * alloc backed by the zalloc world could
+				 * never show up in the kalloc_map... however,
+				 * the kernel_map is a different issue... since it
+				 * was released back into the zalloc pool, a pointer
+				 * would have gotten written over the 'size' that 
+				 * the MALLOC was retaining in the first 4 bytes of
+				 * the underlying allocation... that pointer ends up 
+				 * looking like a really big size on the 2nd FREE and
+				 * pushes the kfree into the kernel_map...  we
+				 * end up removing a ton of virutal space before we panic
+				 * this check causes us to ignore the kfree for a size
+				 * that must be 'bogus'... note that it might not be due
+				 * to the above scenario, but it would still be wrong and
+				 * cause serious damage.
+				 */
+			        return;
+		} else
 			alloc_map = kalloc_map;
 		kmem_free(alloc_map, (vm_offset_t)data, size);
 

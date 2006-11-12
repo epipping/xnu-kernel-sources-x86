@@ -1,23 +1,31 @@
 /*
  * Copyright (c) 2000-2005 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_HEADER_START@
+ * @APPLE_LICENSE_OSREFERENCE_HEADER_START@
  * 
- * The contents of this file constitute Original Code as defined in and
- * are subject to the Apple Public Source License Version 1.1 (the
- * "License").  You may not use this file except in compliance with the
- * License.  Please obtain a copy of the License at
- * http://www.apple.com/publicsource and read it before using this file.
- * 
- * This Original Code and all software distributed under the License are
- * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
- * License for the specific language governing rights and limitations
- * under the License.
- * 
- * @APPLE_LICENSE_HEADER_END@
+ * This file contains Original Code and/or Modifications of Original Code 
+ * as defined in and that are subject to the Apple Public Source License 
+ * Version 2.0 (the 'License'). You may not use this file except in 
+ * compliance with the License.  The rights granted to you under the 
+ * License may not be used to create, or enable the creation or 
+ * redistribution of, unlawful or unlicensed copies of an Apple operating 
+ * system, or to circumvent, violate, or enable the circumvention or 
+ * violation of, any terms of an Apple operating system software license 
+ * agreement.
+ *
+ * Please obtain a copy of the License at 
+ * http://www.opensource.apple.com/apsl/ and read it before using this 
+ * file.
+ *
+ * The Original Code and all software distributed under the License are 
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER 
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES, 
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY, 
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT. 
+ * Please see the License for the specific language governing rights and 
+ * limitations under the License.
+ *
+ * @APPLE_LICENSE_OSREFERENCE_HEADER_END@
  */
 #ifdef	MACH_BSD
 #include <mach_rt.h>
@@ -214,7 +222,12 @@ machine_thread_dup(
     thread_t		child
 )
 {
-	if (child->machine.pcb == NULL || parent->machine.pcb == NULL)
+	
+	pcb_t		parent_pcb;
+	pcb_t		child_pcb;
+
+	if ((child_pcb = child->machine.pcb) == NULL ||
+	    (parent_pcb = parent->machine.pcb) == NULL)
 		return (KERN_FAILURE);
 	/*
 	 * Copy over the i386_saved_state registers
@@ -233,15 +246,22 @@ machine_thread_dup(
 	 */
         fpu_dup_fxstate(parent, child);
 
+#ifdef	MACH_BSD
+	/*
+	 * Copy the parent's cthread id and USER_CTHREAD descriptor, if 32-bit.
+	 */
+	child_pcb->cthread_self = parent_pcb->cthread_self;
+	if (!thread_is_64bit(parent))
+		child_pcb->cthread_desc = parent_pcb->cthread_desc;
+
 	/*
 	 * FIXME - should a user specified LDT, TSS and V86 info
 	 * be duplicated as well?? - probably not.
 	 */
         // duplicate any use LDT entry that was set I think this is appropriate.
-#ifdef	MACH_BSD
-        if (parent->machine.pcb->uldt_selector!= 0) {
-	        child->machine.pcb->uldt_selector = parent->machine.pcb->uldt_selector;
-		child->machine.pcb->uldt_desc = parent->machine.pcb->uldt_desc;
+        if (parent_pcb->uldt_selector!= 0) {
+	        child_pcb->uldt_selector = parent_pcb->uldt_selector;
+		child_pcb->uldt_desc = parent_pcb->uldt_desc;
         }
 #endif
             

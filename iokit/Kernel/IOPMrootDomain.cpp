@@ -1,23 +1,31 @@
 /*
  * Copyright (c) 1998-2005 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_HEADER_START@
+ * @APPLE_LICENSE_OSREFERENCE_HEADER_START@
  * 
- * The contents of this file constitute Original Code as defined in and
- * are subject to the Apple Public Source License Version 1.1 (the
- * "License").  You may not use this file except in compliance with the
- * License.  Please obtain a copy of the License at
- * http://www.apple.com/publicsource and read it before using this file.
- * 
- * This Original Code and all software distributed under the License are
- * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
- * License for the specific language governing rights and limitations
- * under the License.
- * 
- * @APPLE_LICENSE_HEADER_END@
+ * This file contains Original Code and/or Modifications of Original Code 
+ * as defined in and that are subject to the Apple Public Source License 
+ * Version 2.0 (the 'License'). You may not use this file except in 
+ * compliance with the License.  The rights granted to you under the 
+ * License may not be used to create, or enable the creation or 
+ * redistribution of, unlawful or unlicensed copies of an Apple operating 
+ * system, or to circumvent, violate, or enable the circumvention or 
+ * violation of, any terms of an Apple operating system software license 
+ * agreement.
+ *
+ * Please obtain a copy of the License at 
+ * http://www.opensource.apple.com/apsl/ and read it before using this 
+ * file.
+ *
+ * The Original Code and all software distributed under the License are 
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER 
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES, 
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY, 
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT. 
+ * Please see the License for the specific language governing rights and 
+ * limitations under the License.
+ *
+ * @APPLE_LICENSE_OSREFERENCE_HEADER_END@
  */
 #include <IOKit/IOWorkLoop.h>
 #include <IOKit/IOCommandGate.h>
@@ -35,6 +43,7 @@
 #include "IOPMPowerStateQueue.h"
 #include <IOKit/IOCatalogue.h>
 #include <IOKit/IOHibernatePrivate.h>
+#include "IOPMWorkArbiter.h"
 
 #ifdef __ppc__
 #include <ppc/pms.h>
@@ -205,7 +214,7 @@ one power state from Sleep to Doze, and any objects in the tree for which this i
 ADB will turn on again so that they can wake the system out of Doze (keyboard/mouse activity will cause the Display Wrangler
 to be tickled)).
 */
-
+    
 // **********************************************************************************
 
 IOPMrootDomain * IOPMrootDomain::construct( void )
@@ -230,6 +239,13 @@ static void disk_sync_callout(thread_call_param_t p0, thread_call_param_t p1)
     sync_internal();
     rootDomain->allowPowerChange(pmRef);
 }
+
+// **********************************************************************************
+IOPMWorkArbiter *IOPMrootDomain::getPMArbiter(void)
+{
+    return pmArbiter;
+}
+
 
 // **********************************************************************************
 // start
@@ -307,6 +323,11 @@ bool IOPMrootDomain::start ( IOService * nub )
     pm_vars->PMworkloop = IOWorkLoop::workLoop();				
     pmPowerStateQueue = IOPMPowerStateQueue::PMPowerStateQueue(this);
     pm_vars->PMworkloop->addEventSource(pmPowerStateQueue);
+    
+    /* Initialize PM arbiter */
+    pmArbiter = IOPMWorkArbiter::pmWorkArbiter(this);
+    arbiterWorkLoop = IOWorkLoop::workLoop();
+    arbiterWorkLoop->addEventSource(pmArbiter);
     
     featuresDictLock = IOLockAlloc();
     settingsCtrlLock = IORecursiveLockAlloc();
@@ -1273,12 +1294,14 @@ void IOPMrootDomain::sendClientClamshellNotification ( void )
        shouldSleepOnClamshellClosed() ? kOSBooleanTrue : kOSBooleanFalse);
 
 
-    /* Argument to message is a bitfiel of 
+    /* Argument to message is a bitfield of 
      *      ( kClamshellStateBit | kClamshellSleepBit )
+     * Carry on the clamshell state change notification from an 
+     * independent thread.
      */
-    messageClients(kIOPMMessageClamshellStateChange,
-        (void *) ( (clamshellIsClosed ? kClamshellStateBit : 0)
-             | ( shouldSleepOnClamshellClosed() ? kClamshellSleepBit : 0)) );
+    pmArbiter->clamshellStateChangeOccurred(
+            (uint32_t) ( (clamshellIsClosed ? kClamshellStateBit : 0)
+             | ( shouldSleepOnClamshellClosed() ? kClamshellSleepBit : 0)));
 }
 
 //******************************************************************************
